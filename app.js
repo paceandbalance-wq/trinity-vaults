@@ -305,11 +305,7 @@ function updateNavActive(){
 
 /* ================= SWITCHER ================= */
 function renderSwitcher(){
-  return '<div class="view-header">'
-      +'<div class="page-pill">Trinity Vaults</div>'
-    +'</div>'
-    +'<p class="view-desc">Choose a vault to open.</p>'
-    +'<div class="bento">'
+  return '<div class="bento">'
       +'<button class="vault-tile tile-wide" style="--accent:var(--accent-operational)" onclick="openOperationalHome()">'
         +'<div class="tile-icon">'+icon('layers')+'</div>'
         +'<div class="tile-name">Operational Vault</div>'
