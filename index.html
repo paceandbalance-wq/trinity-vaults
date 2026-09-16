@@ -42,6 +42,8 @@
     --shadow-md:0 10px 28px rgba(0,0,0,0.14);
     --shadow-lg:0 24px 60px rgba(0,0,0,0.28);
     --card-border-w:0px;
+
+    --accent-operational:#7c4dff;
   }
   [data-theme="dark"]{
     --text-primary:#f2f3f5;
@@ -422,9 +424,9 @@
   <main id="view"></main>
 
   <nav class="bottom-nav">
-    <button class="nav-btn" id="nav-running" onclick="openVault('running')" title="Running Vault"></button>
-    <button class="nav-btn" id="nav-memory" onclick="openVault('memory')" title="Memory Vault"></button>
-    <button class="nav-btn center" onclick="goHome()" title="Trinity Vaults">
+    <button class="nav-btn" id="nav-operational" onclick="openOperationalHome()" title="Operational Vault"></button>
+    <button class="nav-btn" id="nav-trinity" onclick="goHome()" title="Trinity Vault"></button>
+    <button class="nav-btn center" onclick="goSwitcher()" title="Vault Switcher">
       <img class="nav-logo-img" id="nav-logo-img" alt="Trinity">
     </button>
     <button class="nav-btn" id="nav-business" onclick="goBusinessHome()" title="Business Vault"></button>
@@ -508,7 +510,8 @@ function icon(name){
     buildlog:'<path d="M6 21V4"/><path d="M6 5h11l-3 4 3 4H6"/>',
     glossary:'<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 5.5v15"/>',
     upload:'<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
-    cloud:'<path d="M7 18a4 4 0 0 1-1-7.9A5 5 0 0 1 16 8a3.5 3.5 0 0 1 1 6.9"/><path d="M8 18h8"/>'
+    cloud:'<path d="M7 18a4 4 0 0 1-1-7.9A5 5 0 0 1 16 8a3.5 3.5 0 0 1 1 6.9"/><path d="M8 18h8"/>',
+    layers:'<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>'
   };
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+(p[name]||'')+'</svg>';
 }
@@ -555,7 +558,7 @@ const IMPORT_TARGETS = [
 ];
 
 /* ================= STATE + STORAGE ================= */
-let state = {view:'home', vaultKey:null, subKey:null};
+let state = {view:'switcher', vaultKey:null, subKey:null};
 let pendingLink = null;
 
 function defaultDB(){
@@ -615,11 +618,15 @@ function goBusinessHome(){ state.view='business-home'; state.vaultKey=null; stat
 function openSub(key){ state.view='subvault'; state.subKey=key; render(); }
 function goProgress(){ state.view='progress'; render(); }
 function goSettings(){ state.view='settings'; render(); }
+function goSwitcher(){ state.view='switcher'; state.vaultKey=null; state.subKey=null; render(); }
+function openOperationalHome(){ state.view='operational-home'; state.vaultKey=null; state.subKey=null; render(); }
 
 /* ================= RENDER ================= */
 function render(){
   const view = document.getElementById('view');
-  if(state.view==='home') view.innerHTML = renderHome();
+  if(state.view==='switcher') view.innerHTML = renderSwitcher();
+  else if(state.view==='operational-home') view.innerHTML = renderOperationalHome();
+  else if(state.view==='home') view.innerHTML = renderHome();
   else if(state.view==='vault') view.innerHTML = renderVaultView({type:'simple', key:state.vaultKey});
   else if(state.view==='business-home') view.innerHTML = renderBusinessHome();
   else if(state.view==='subvault') view.innerHTML = renderVaultView({type:'business', key:state.subKey});
@@ -629,18 +636,48 @@ function render(){
 }
 
 function updateNavActive(){
-  const nRunning = document.getElementById('nav-running');
-  const nMemory = document.getElementById('nav-memory');
+  const nOperational = document.getElementById('nav-operational');
+  const nTrinity = document.getElementById('nav-trinity');
   const nBusiness = document.getElementById('nav-business');
   const nSettings = document.getElementById('nav-settings');
-  nRunning.innerHTML = icon('running');
-  nMemory.innerHTML = icon('memory');
+  nOperational.innerHTML = icon('layers');
+  nTrinity.innerHTML = icon('home');
   nBusiness.innerHTML = icon('business');
   nSettings.innerHTML = icon('gear');
-  nRunning.classList.toggle('active', state.view==='vault' && state.vaultKey==='running');
-  nMemory.classList.toggle('active', state.view==='vault' && state.vaultKey==='memory');
+  nOperational.classList.toggle('active', state.view==='operational-home');
+  nTrinity.classList.toggle('active', state.view==='home' || state.view==='vault' || state.view==='progress');
   nBusiness.classList.toggle('active', state.view==='business-home' || state.view==='subvault');
   nSettings.classList.toggle('active', state.view==='settings');
+}
+
+/* ================= SWITCHER ================= */
+function renderSwitcher(){
+  return '<div class="view-header">'
+      +'<div class="page-pill">Trinity Vaults</div>'
+    +'</div>'
+    +'<p class="view-desc">Choose a vault to open.</p>'
+    +'<div class="bento">'
+      +'<button class="vault-tile tile-wide" style="--accent:var(--accent-operational)" onclick="openOperationalHome()">'
+        +'<div class="tile-icon">'+icon('layers')+'</div>'
+        +'<div class="tile-name">Operational Vault</div>'
+        +'<div class="tile-desc">Reference library &mdash; procedures, rules, and how-tos, organised by folder.</div>'
+      +'</button>'
+      +'<button class="vault-tile tile-wide" style="--accent:var(--primary)" onclick="goHome()">'
+        +'<div class="tile-icon">'+icon('home')+'</div>'
+        +'<div class="tile-name">Trinity Vault</div>'
+        +'<div class="tile-desc">Running, Memory, Decisions, Questions, Build Log, Glossary &amp; Business Vault.</div>'
+      +'</button>'
+    +'</div>';
+}
+
+/* ================= OPERATIONAL VAULT (placeholder) ================= */
+function renderOperationalHome(){
+  return '<div class="view-header">'
+    +'<button class="icon-btn" onclick="goSwitcher()">'+icon('back')+'</button>'
+    +'<div class="page-pill" style="border-color:var(--accent-operational)">Operational Vault</div>'
+    +'</div>'
+    +'<p class="view-desc">Reference library for procedures, rules, and how-tos.</p>'
+    +'<div class="empty-state">Coming soon.</div>';
 }
 
 function renderHome(){
