@@ -1093,6 +1093,13 @@ function initCloud(){
     if(typeof firebase === 'undefined') return;
     firebase.initializeApp(FIREBASE_CONFIG);
     cloudEnabled = true;
+    /* Offline persistence: cached reads work instantly (including on
+       reload while offline), and writes made offline queue locally and
+       sync once the connection returns. Must be called before any other
+       Firestore call, and before the auth/snapshot listeners below. */
+    firebase.firestore().enablePersistence({synchronizeTabs:true}).catch(function(e){
+      console.log('Offline persistence not enabled:', e.code);
+    });
     firebase.auth().onAuthStateChanged(function(user){
       cloudUser = user;
       if(state.view==='settings') render();
