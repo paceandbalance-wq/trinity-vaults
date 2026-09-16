@@ -158,6 +158,95 @@ function businessTotal(){
   return objValues(db.business).reduce(function(s,a){ return s+a.length; }, 0);
 }
 
+/* ================= OPERATIONAL VAULT: STATE + STORAGE =================
+   Stored one document per entry, separate from the single `db` document
+   above, so the library isn't capped by Firestore's 1 MiB document limit:
+   trinityVaultsUsers/{uid}/operationalEntries/{entryId}
+*/
+function loadOperationalEntries(){
+  try{
+    const raw = localStorage.getItem('trinityVaultsOperationalEntries');
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return [];
+}
+let operationalEntries = loadOperationalEntries();
+
+function saveOperationalEntriesLocal(){
+  try{
+    localStorage.setItem('trinityVaultsOperationalEntries', JSON.stringify(operationalEntries));
+  }catch(e){
+    console.log('Local save failed (continuing anyway):', e);
+  }
+}
+function getOperationalEntry(id){
+  return operationalEntries.find(function(e){ return e.id===id; });
+}
+function opTimeValue(ts){
+  if(!ts) return 0;
+  return typeof ts.toMillis === 'function' ? ts.toMillis() : ts;
+}
+function formatOpDate(ts){
+  const ms = opTimeValue(ts);
+  if(!ms) return '';
+  return new Date(ms).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+}
+function operationalDocRef(id){
+  if(!cloudEnabled || !cloudUser) return null;
+  return firebase.firestore().collection('trinityVaultsUsers').doc(cloudUser.uid).collection('operationalEntries').doc(id);
+}
+
+function addOperationalEntry(data){
+  const id = 'e'+Date.now();
+  const entry = {
+    id: id,
+    path: data.path || [],
+    content: data.content || '',
+    attachment: data.attachment || {type:null, value:''},
+    linkedEntryIds: data.linkedEntryIds || [],
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+  operationalEntries.push(entry);
+  saveOperationalEntriesLocal();
+  const ref = operationalDocRef(id);
+  if(ref){
+    ref.set({
+      path: entry.path,
+      content: entry.content,
+      attachment: entry.attachment,
+      linkedEntryIds: entry.linkedEntryIds,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(e){ console.log('Cloud save failed (continuing anyway):', e); });
+  }
+  return id;
+}
+function saveOperationalEntry(id, data){
+  const idx = operationalEntries.findIndex(function(e){ return e.id===id; });
+  if(idx>-1) Object.assign(operationalEntries[idx], data, {updatedAt:Date.now()});
+  saveOperationalEntriesLocal();
+  const ref = operationalDocRef(id);
+  if(ref){
+    ref.set(Object.assign({}, data, {updatedAt: firebase.firestore.FieldValue.serverTimestamp()}), {merge:true})
+      .catch(function(e){ console.log('Cloud save failed (continuing anyway):', e); });
+  }
+}
+function deleteOperationalEntry(id){
+  operationalEntries = operationalEntries.filter(function(e){ return e.id!==id; });
+  saveOperationalEntriesLocal();
+  const ref = operationalDocRef(id);
+  if(ref) ref.delete().catch(function(e){ console.log('Cloud delete failed (continuing anyway):', e); });
+}
+function subscribeToOperational(uid){
+  const ref = firebase.firestore().collection('trinityVaultsUsers').doc(uid).collection('operationalEntries');
+  unsubscribeOperational = ref.onSnapshot(function(snap){
+    operationalEntries = snap.docs.map(function(doc){ return Object.assign({id:doc.id}, doc.data()); });
+    saveOperationalEntriesLocal();
+    if(state.view==='operational-home') render();
+  });
+}
+
 /* ================= THEME ================= */
 function applyTheme(t){
   document.documentElement.setAttribute('data-theme', t);
@@ -225,14 +314,103 @@ function renderSwitcher(){
     +'</div>';
 }
 
-/* ================= OPERATIONAL VAULT (placeholder) ================= */
+/* ================= OPERATIONAL VAULT ================= */
+function operationalEntryTitle(e){
+  return e.path && e.path.length ? e.path.join(' › ') : '(untitled)';
+}
 function renderOperationalHome(){
+  const list = operationalEntries.slice().sort(function(a,b){ return opTimeValue(b.updatedAt)-opTimeValue(a.updatedAt); });
+  const rows = list.length===0
+    ? '<div class="empty-state">Nothing here yet. Tap "+ Add" to create the first entry.</div>'
+    : list.map(function(e){
+        const title = escapeHtml(operationalEntryTitle(e));
+        const rawSnippet = e.content||'';
+        const snippet = escapeHtml(rawSnippet.slice(0,80)) + (rawSnippet.length>80?'&hellip;':'');
+        return '<div class="entry-row">'
+          +'<button class="entry-main" style="--accent:var(--accent-operational)" onclick="viewOperationalEntry(\''+e.id+'\')">'
+            +'<div class="entry-title">'+title+'</div>'
+            +'<div class="entry-snippet">'+snippet+'</div>'
+            +'<div class="entry-date">'+formatOpDate(e.updatedAt)+'</div>'
+          +'</button>'
+          +'<div class="entry-actions">'
+            +'<button class="icon-btn" title="Edit" onclick="openOperationalEntryForm(\''+e.id+'\')">'+icon('edit')+'</button>'
+            +'<button class="icon-btn" title="Delete" onclick="confirmDeleteOperationalEntry(\''+e.id+'\')">'+icon('trash')+'</button>'
+          +'</div>'
+        +'</div>';
+      }).join('');
   return '<div class="view-header">'
     +'<button class="icon-btn" onclick="goSwitcher()">'+icon('back')+'</button>'
     +'<div class="page-pill" style="border-color:var(--accent-operational)">Operational Vault</div>'
+    +'<button class="add-btn" style="background:var(--accent-operational)" onclick="openOperationalEntryForm()">'+icon('plus')+' Add</button>'
     +'</div>'
     +'<p class="view-desc">Reference library for procedures, rules, and how-tos.</p>'
-    +'<div class="empty-state">Coming soon.</div>';
+    +'<div class="entry-list">'+rows+'</div>';
+}
+
+function viewOperationalEntry(id){
+  const e = getOperationalEntry(id);
+  if(!e) return;
+  const contentHtml = escapeHtml(e.content||'').replace(/\n/g,'<br>');
+  const html = '<div class="card" style="--accent:var(--accent-operational)">'
+    +'<button class="card-close" onclick="closeModal()">'+icon('close')+'</button>'
+    +'<div class="card-date">'+formatOpDate(e.updatedAt)+'</div>'
+    +'<h3>'+escapeHtml(operationalEntryTitle(e))+'</h3>'
+    +'<div class="card-field"><div class="card-field-label">Content</div><div class="card-field-value">'+(contentHtml||'&mdash;')+'</div></div>'
+    +'<div class="card-actions">'
+      +'<button class="btn-outline" onclick="confirmDeleteOperationalEntry(\''+id+'\')">'+icon('trash')+' Delete</button>'
+      +'<button class="btn-outline" onclick="closeModal(); openOperationalEntryForm(\''+id+'\')">'+icon('edit')+' Edit</button>'
+    +'</div>'
+  +'</div>';
+  showModal(html);
+}
+
+function openOperationalEntryForm(id){
+  const existing = id ? getOperationalEntry(id) : null;
+  const pathVal = escapeHtml(existing && existing.path ? existing.path.join(' > ') : '');
+  const contentVal = escapeHtml(existing ? existing.content||'' : '');
+  const heading = existing ? 'Edit' : 'Add';
+  const html = '<div class="card" style="--accent:var(--accent-operational)">'
+    +'<button class="card-close" onclick="closeModal()">'+icon('close')+'</button>'
+    +'<h3>'+heading+' &mdash; Operational Vault</h3>'
+    +'<div class="form-body">'
+      +'<label class="form-label">Path</label>'
+      +'<input id="op_path" type="text" value="'+pathVal+'" placeholder="ICO &gt; Rule 25.3" />'
+      +'<div class="form-hint">Separate nested categories with &gt;, e.g. ICO &gt; Rule 25.3</div>'
+      +'<label class="form-label">Content</label>'
+      +'<textarea id="op_content" rows="8">'+contentVal+'</textarea>'
+    +'</div>'
+    +'<div id="op-form-error" class="form-hint" style="color:#c0392b;"></div>'
+    +'<div class="card-actions">'
+      +'<button class="btn-outline" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn-solid" style="background:var(--accent-operational)" onclick="saveOperationalEntryForm('+(existing?"'"+existing.id+"'":'null')+')">Save</button>'
+    +'</div>'
+  +'</div>';
+  showModal(html);
+}
+
+function saveOperationalEntryForm(id){
+  const pathRaw = document.getElementById('op_path').value.trim();
+  const content = document.getElementById('op_content').value.trim();
+  if(!pathRaw){
+    const err = document.getElementById('op-form-error');
+    if(err) err.textContent = 'Please fill in "Path" before saving.';
+    return;
+  }
+  const path = pathRaw.split('>').map(function(s){ return s.trim(); }).filter(Boolean);
+  if(id) saveOperationalEntry(id, {path:path, content:content});
+  else addOperationalEntry({path:path, content:content});
+  closeModal();
+  render();
+}
+
+function confirmDeleteOperationalEntry(id){
+  const e = getOperationalEntry(id);
+  const label = e ? operationalEntryTitle(e) : 'this entry';
+  showConfirm('Delete "'+label+'"? This can’t be undone.', function(){
+    deleteOperationalEntry(id);
+    closeModal();
+    render();
+  }, 'Delete');
 }
 
 function renderHome(){
@@ -634,6 +812,7 @@ function resetAll(){
 let cloudEnabled = false;
 let cloudUser = null;
 let unsubscribeSnapshot = null;
+let unsubscribeOperational = null;
 let applyingRemoteUpdate = false;
 let saveDebounceTimer = null;
 
@@ -648,9 +827,16 @@ function initCloud(){
       if(state.view==='settings') render();
       if(user){
         subscribeToCloud(user.uid);
-      } else if(unsubscribeSnapshot){
-        unsubscribeSnapshot();
-        unsubscribeSnapshot = null;
+        subscribeToOperational(user.uid);
+      } else {
+        if(unsubscribeSnapshot){
+          unsubscribeSnapshot();
+          unsubscribeSnapshot = null;
+        }
+        if(unsubscribeOperational){
+          unsubscribeOperational();
+          unsubscribeOperational = null;
+        }
       }
     });
   }catch(e){
