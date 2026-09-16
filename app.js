@@ -70,6 +70,11 @@ function icon(name){
   };
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+(p[name]||'')+'</svg>';
 }
+/* icon(), sized inline for the rare spot where it isn't nested in a class
+   that already gives svg a size (.icon-btn svg, .btn-outline svg, etc). */
+function smallIcon(name, px){
+  return icon(name).replace('<svg ', '<svg style="width:'+px+'px;height:'+px+'px;flex-shrink:0;vertical-align:-3px;" ');
+}
 
 /* ================= CONFIG ================= */
 const VAULTS = {
@@ -437,6 +442,18 @@ function renderOperationalCategory(){
     +body;
 }
 
+function renderOpAttachmentField(e){
+  const a = e.attachment;
+  if(!a || !a.type || !a.value) return '';
+  if(a.type==='link'){
+    return '<div class="card-field"><div class="card-field-label">Attachment</div>'
+      +'<a class="btn-outline" href="'+escapeHtml(a.value)+'" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">'+icon('upload')+' Open link</a>'
+    +'</div>';
+  }
+  return '<div class="card-field"><div class="card-field-label">Attachment</div>'
+    +'<div class="entry-snippet">'+smallIcon('upload',14)+' '+escapeHtml(a.value)+' &mdash; local file (not stored)</div>'
+  +'</div>';
+}
 function viewOperationalEntry(id){
   const e = getOperationalEntry(id);
   if(!e) return;
@@ -446,6 +463,7 @@ function viewOperationalEntry(id){
     +'<div class="card-date">'+formatOpDate(e.updatedAt)+'</div>'
     +'<h3>'+escapeHtml(operationalEntryTitle(e))+'</h3>'
     +'<div class="card-field"><div class="card-field-label">Content</div><div class="card-field-value">'+(contentHtml||'&mdash;')+'</div></div>'
+    +renderOpAttachmentField(e)
     +'<div class="card-actions">'
       +'<button class="btn-outline" onclick="confirmDeleteOperationalEntry(\''+id+'\')">'+icon('trash')+' Delete</button>'
       +'<button class="btn-outline" onclick="closeModal(); openOperationalEntryForm(\''+id+'\')">'+icon('edit')+' Edit</button>'
@@ -454,11 +472,44 @@ function viewOperationalEntry(id){
   showModal(html);
 }
 
+/* Add/edit form's attachment sub-state (reset each time the form opens,
+   re-rendered in place on toggle so Path/Content aren't disturbed). */
+let opFormAttach = {type:'link', value:''};
+function renderOpAttachToggleButtons(){
+  return '<button type="button" class="'+(opFormAttach.type==='link'?'active':'')+'" onclick="setOpAttachMode(\'link\')">Paste a link</button>'
+    +'<button type="button" class="'+(opFormAttach.type==='local'?'active':'')+'" onclick="setOpAttachMode(\'local\')">Choose a file</button>';
+}
+function renderOpAttachFields(){
+  if(opFormAttach.type==='local'){
+    return '<input id="op_attach_file_input" type="file" style="display:none" onchange="onOpAttachFileChosen(event)" />'
+      +'<button type="button" class="btn-outline" onclick="document.getElementById(\'op_attach_file_input\').click()">'+icon('upload')+' Choose file</button>'
+      +' <span id="op_attach_filename" class="form-hint">'+(opFormAttach.value?escapeHtml(opFormAttach.value):'No file chosen')+'</span>';
+  }
+  return '<input id="op_attach_link_input" type="text" placeholder="https://..." value="'+escapeHtml(opFormAttach.value||'')+'" />';
+}
+function setOpAttachMode(mode){
+  if(opFormAttach.type===mode) return;
+  opFormAttach = {type:mode, value:''};
+  const toggle = document.getElementById('op-attach-toggle');
+  const fields = document.getElementById('op-attach-fields');
+  if(toggle) toggle.innerHTML = renderOpAttachToggleButtons();
+  if(fields) fields.innerHTML = renderOpAttachFields();
+}
+function onOpAttachFileChosen(event){
+  const file = event.target.files[0];
+  opFormAttach.value = file ? file.name : '';
+  const span = document.getElementById('op_attach_filename');
+  if(span) span.textContent = opFormAttach.value || 'No file chosen';
+}
+
 function openOperationalEntryForm(id, prefillCategory){
   const existing = id ? getOperationalEntry(id) : null;
   const pathVal = escapeHtml(existing && existing.path ? existing.path.join(' > ') : (prefillCategory ? prefillCategory+' > ' : ''));
   const contentVal = escapeHtml(existing ? existing.content||'' : '');
   const heading = existing ? 'Edit' : 'Add';
+  opFormAttach = (existing && existing.attachment && existing.attachment.type)
+    ? {type:existing.attachment.type, value:existing.attachment.value||''}
+    : {type:'link', value:''};
   const html = '<div class="card" style="--accent:var(--accent-operational)">'
     +'<button class="card-close" onclick="closeModal()">'+icon('close')+'</button>'
     +'<h3>'+heading+' &mdash; Operational Vault</h3>'
@@ -468,6 +519,10 @@ function openOperationalEntryForm(id, prefillCategory){
       +'<div class="form-hint">Separate nested categories with &gt;, e.g. ICO &gt; Rule 25.3</div>'
       +'<label class="form-label">Content</label>'
       +'<textarea id="op_content" rows="8">'+contentVal+'</textarea>'
+      +'<label class="form-label">Attachment</label>'
+      +'<div class="theme-toggle" id="op-attach-toggle" style="margin-left:0;">'+renderOpAttachToggleButtons()+'</div>'
+      +'<div id="op-attach-fields" style="margin-top:8px;">'+renderOpAttachFields()+'</div>'
+      +'<div class="form-hint">Paste a link (OneDrive, Drive, etc.) or pick a file &mdash; only its name is kept, nothing is uploaded.</div>'
     +'</div>'
     +'<div id="op-form-error" class="form-hint" style="color:#c0392b;"></div>'
     +'<div class="card-actions">'
@@ -487,8 +542,16 @@ function saveOperationalEntryForm(id){
     return;
   }
   const path = pathRaw.split('>').map(function(s){ return s.trim(); }).filter(Boolean);
-  if(id) saveOperationalEntry(id, {path:path, content:content});
-  else addOperationalEntry({path:path, content:content});
+  let attachment = {type:null, value:''};
+  if(opFormAttach.type==='link'){
+    const linkInput = document.getElementById('op_attach_link_input');
+    const val = linkInput ? linkInput.value.trim() : '';
+    if(val) attachment = {type:'link', value:val};
+  } else if(opFormAttach.type==='local' && opFormAttach.value){
+    attachment = {type:'local', value:opFormAttach.value};
+  }
+  if(id) saveOperationalEntry(id, {path:path, content:content, attachment:attachment});
+  else addOperationalEntry({path:path, content:content, attachment:attachment});
   closeModal();
   render();
 }
