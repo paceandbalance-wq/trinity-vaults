@@ -454,6 +454,37 @@ function renderOpAttachmentField(e){
     +'<div class="entry-snippet">'+smallIcon('upload',14)+' '+escapeHtml(a.value)+' &mdash; local file (not stored)</div>'
   +'</div>';
 }
+function sanitizeFilename(s){
+  return String(s).replace(/[\\/:*?"<>|]/g,'-');
+}
+function copyOperationalEntry(id, btnEl){
+  const e = getOperationalEntry(id);
+  if(!e || !btnEl) return;
+  const restore = btnEl.innerHTML;
+  function flip(label){
+    btnEl.innerHTML = label;
+    setTimeout(function(){ btnEl.innerHTML = restore; }, 1500);
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(e.content||'').then(function(){
+      flip(icon('check')+' Copied');
+    }, function(){
+      flip('Copy failed');
+    });
+  } else {
+    flip('Copy failed');
+  }
+}
+function downloadOperationalEntryMd(id){
+  const e = getOperationalEntry(id);
+  if(!e) return;
+  const filename = sanitizeFilename(e.path&&e.path.length ? e.path.join(' - ') : 'entry')+'.md';
+  const blob = new Blob([e.content||''], {type:'text/markdown'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
 function viewOperationalEntry(id){
   const e = getOperationalEntry(id);
   if(!e) return;
@@ -467,6 +498,8 @@ function viewOperationalEntry(id){
     +'<div class="card-actions">'
       +'<button class="btn-outline" onclick="confirmDeleteOperationalEntry(\''+id+'\')">'+icon('trash')+' Delete</button>'
       +'<button class="btn-outline" onclick="closeModal(); openOperationalEntryForm(\''+id+'\')">'+icon('edit')+' Edit</button>'
+      +'<button class="btn-outline" onclick="copyOperationalEntry(\''+id+'\', this)">'+icon('glossary')+' Copy</button>'
+      +'<button class="btn-outline" onclick="downloadOperationalEntryMd(\''+id+'\')">'+icon('buildlog')+' Download as .md</button>'
     +'</div>'
   +'</div>';
   showModal(html);
