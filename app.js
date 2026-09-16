@@ -270,6 +270,7 @@ function goSettings(){ state.view='settings'; render(); }
 function goSwitcher(){ state.view='switcher'; state.vaultKey=null; state.subKey=null; render(); }
 function openOperationalHome(){ state.view='operational-home'; state.vaultKey=null; state.subKey=null; state.opCategory=null; render(); }
 function openOperationalCategory(cat){ state.view='operational-category'; state.opCategory=cat; render(); }
+function goImportExportHub(){ state.view='import-export-hub'; state.vaultKey=null; state.subKey=null; state.opCategory=null; render(); }
 
 /* ================= RENDER ================= */
 function render(){
@@ -277,6 +278,7 @@ function render(){
   if(state.view==='switcher') view.innerHTML = renderSwitcher();
   else if(state.view==='operational-home') view.innerHTML = renderOperationalHome();
   else if(state.view==='operational-category') view.innerHTML = renderOperationalCategory();
+  else if(state.view==='import-export-hub') view.innerHTML = renderImportExportHub();
   else if(state.view==='home') view.innerHTML = renderHome();
   else if(state.view==='vault') view.innerHTML = renderVaultView({type:'simple', key:state.vaultKey});
   else if(state.view==='business-home') view.innerHTML = renderBusinessHome();
@@ -289,15 +291,15 @@ function render(){
 function updateNavActive(){
   const nOperational = document.getElementById('nav-operational');
   const nTrinity = document.getElementById('nav-trinity');
-  const nBusiness = document.getElementById('nav-business');
+  const nImportExport = document.getElementById('nav-importexport');
   const nSettings = document.getElementById('nav-settings');
   nOperational.innerHTML = icon('layers');
   nTrinity.innerHTML = icon('home');
-  nBusiness.innerHTML = icon('business');
+  nImportExport.innerHTML = icon('upload');
   nSettings.innerHTML = icon('gear');
   nOperational.classList.toggle('active', state.view==='operational-home' || state.view==='operational-category');
-  nTrinity.classList.toggle('active', state.view==='home' || state.view==='vault' || state.view==='progress');
-  nBusiness.classList.toggle('active', state.view==='business-home' || state.view==='subvault');
+  nTrinity.classList.toggle('active', state.view==='home' || state.view==='vault' || state.view==='progress' || state.view==='business-home' || state.view==='subvault');
+  nImportExport.classList.toggle('active', state.view==='import-export-hub');
   nSettings.classList.toggle('active', state.view==='settings');
 }
 
@@ -317,6 +319,27 @@ function renderSwitcher(){
         +'<div class="tile-icon">'+icon('home')+'</div>'
         +'<div class="tile-name">Trinity Vault</div>'
         +'<div class="tile-desc">Running, Memory, Decisions, Questions, Build Log, Glossary &amp; Business Vault.</div>'
+      +'</button>'
+    +'</div>';
+}
+
+/* ================= IMPORT / EXPORT HUB ================= */
+function renderImportExportHub(){
+  return '<div class="view-header">'
+    +'<button class="icon-btn" onclick="goSwitcher()">'+icon('back')+'</button>'
+    +'<div class="page-pill">Import / Export</div>'
+    +'</div>'
+    +'<p class="view-desc">Choose which vault to import into or export from.</p>'
+    +'<div class="bento">'
+      +'<button class="vault-tile tile-wide" style="--accent:var(--accent-operational)" onclick="openOperationalImportExportPanel()">'
+        +'<div class="tile-icon">'+icon('layers')+'</div>'
+        +'<div class="tile-name">Operational Vault Import/Export</div>'
+        +'<div class="tile-desc">Import or export the Operational Vault library as JSON.</div>'
+      +'</button>'
+      +'<button class="vault-tile tile-wide" style="--accent:var(--primary)" onclick="openImportPicker()">'
+        +'<div class="tile-icon">'+icon('home')+'</div>'
+        +'<div class="tile-name">Trinity Vault Import/Export</div>'
+        +'<div class="tile-desc">Import or export Running, Memory, Decisions and the rest as JSON.</div>'
       +'</button>'
     +'</div>';
 }
@@ -378,6 +401,7 @@ function renderOperationalHome(){
     +'<button class="icon-btn" onclick="goSwitcher()">'+icon('back')+'</button>'
     +'<div class="page-pill" style="border-color:var(--accent-operational)">Operational Vault</div>'
     +'<button class="add-btn" style="background:var(--accent-operational)" onclick="openOperationalEntryForm()">'+icon('plus')+' Add</button>'
+    +'<button class="icon-btn" title="Import / Export" onclick="openOperationalImportExportPanel()">'+icon('upload')+'</button>'
     +'</div>'
     +'<p class="view-desc">Reference library for procedures, rules, and how-tos.</p>'
     +'<div class="form-body" style="margin-bottom:16px;"><input id="op-search-input" type="text" placeholder="Search entries…" oninput="filterOperationalHome()" /></div>'
@@ -599,10 +623,68 @@ function confirmDeleteOperationalEntry(id){
   }, 'Delete');
 }
 
+/* ---- Operational Vault import / export ---- */
+function exportOperationalData(){
+  const blob = new Blob([JSON.stringify(operationalEntries,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'operational-vault-backup-'+todayStr().replace(/\s+/g,'-')+'.json';
+  a.click();
+}
+function doImportOperational(){
+  const fileInput = document.getElementById('op-import-file');
+  const file = fileInput.files[0];
+  const errEl = document.getElementById('op-import-error');
+  if(!file){ if(errEl) errEl.textContent = 'Choose a file first.'; return; }
+  const reader = new FileReader();
+  reader.onload = function(){
+    try{
+      let parsed = JSON.parse(reader.result);
+      if(!Array.isArray(parsed)) parsed = [parsed];
+      let added = 0;
+      parsed.forEach(function(item){
+        if(!item || !Array.isArray(item.path) || item.path.length===0) return;
+        addOperationalEntry({
+          path: item.path.map(function(s){ return String(s); }),
+          content: item.content||'',
+          attachment: (item.attachment && item.attachment.type) ? {type:item.attachment.type, value:item.attachment.value||''} : {type:null, value:''},
+          linkedEntryIds: Array.isArray(item.linkedEntryIds) ? item.linkedEntryIds : []
+        });
+        added++;
+      });
+      if(added===0){ if(errEl) errEl.textContent = 'No valid entries found in that file.'; return; }
+      render();
+      showAlert(added+' '+(added===1?'entry':'entries')+' added to Operational Vault.');
+    }catch(e){
+      if(errEl) errEl.textContent = 'That file could not be read as vault entries.';
+    }
+  };
+  reader.readAsText(file);
+}
+function openOperationalImportExportPanel(){
+  const html = '<div class="card" style="--accent:var(--accent-operational)">'
+    +'<button class="card-close" onclick="closeModal()">'+icon('close')+'</button>'
+    +'<h3>Operational Vault Import/Export</h3>'
+    +'<div class="card-actions" style="margin-top:0;margin-bottom:20px;">'
+      +'<button class="btn-solid" style="background:var(--accent-operational)" onclick="exportOperationalData()">'+icon('buildlog')+' Export everything</button>'
+    +'</div>'
+    +'<div class="form-body">'
+      +'<label class="form-label">JSON file</label>'
+      +'<input id="op-import-file" type="file" accept="application/json" />'
+      +'<div class="form-hint">A file with one entry, or a list of entries, matching Operational Vault\'s shape (<code>path</code>, <code>content</code>, <code>attachment</code>, <code>linkedEntryIds</code>). Ask Claude in chat to generate this file.</div>'
+      +'<div id="op-import-error" class="form-hint" style="color:#c0392b;"></div>'
+    +'</div>'
+    +'<div class="card-actions">'
+      +'<button class="btn-outline" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn-solid" style="background:var(--accent-operational)" onclick="doImportOperational()">Import</button>'
+    +'</div>'
+  +'</div>';
+  showModal(html);
+}
+
 function renderHome(){
   const toolbar = '<div class="home-toolbar">'
-    +'<button class="btn-outline" onclick="openImportPicker()">'+icon('upload')+' Import entries</button>'
-    +'<button class="btn-outline" onclick="exportData()">'+icon('buildlog')+' Export everything</button>'
+    +'<button class="icon-btn" title="Import / Export" onclick="openImportPicker()">'+icon('upload')+'</button>'
     +'</div>';
   const tiles = HOME_ORDER.map(function(o){
     const cfg = VAULTS[o.key];
@@ -908,7 +990,10 @@ function openImportPicker(){
   const options = IMPORT_TARGETS.map(function(t,i){ return '<option value="'+i+'">'+t.label+'</option>'; }).join('');
   const html = '<div class="card" style="--accent:'+VAULTS.running.color+'">'
     +'<button class="card-close" onclick="closeModal()">'+icon('close')+'</button>'
-    +'<h3>Import entries</h3>'
+    +'<h3>Trinity Vault Import/Export</h3>'
+    +'<div class="card-actions" style="margin-top:0;margin-bottom:20px;">'
+      +'<button class="btn-solid" style="background:'+VAULTS.running.color+'" onclick="exportData()">'+icon('buildlog')+' Export everything</button>'
+    +'</div>'
     +'<div class="form-body">'
       +'<label class="form-label">Which vault?</label>'
       +'<select id="import-target">'+options+'</select>'
