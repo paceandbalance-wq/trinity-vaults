@@ -113,7 +113,7 @@ const IMPORT_TARGETS = [
 ];
 
 /* ================= STATE + STORAGE ================= */
-let state = {view:'switcher', vaultKey:null, subKey:null};
+let state = {view:'switcher', vaultKey:null, subKey:null, opCategory:null};
 let pendingLink = null;
 
 function defaultDB(){
@@ -263,13 +263,15 @@ function openSub(key){ state.view='subvault'; state.subKey=key; render(); }
 function goProgress(){ state.view='progress'; render(); }
 function goSettings(){ state.view='settings'; render(); }
 function goSwitcher(){ state.view='switcher'; state.vaultKey=null; state.subKey=null; render(); }
-function openOperationalHome(){ state.view='operational-home'; state.vaultKey=null; state.subKey=null; render(); }
+function openOperationalHome(){ state.view='operational-home'; state.vaultKey=null; state.subKey=null; state.opCategory=null; render(); }
+function openOperationalCategory(cat){ state.view='operational-category'; state.opCategory=cat; render(); }
 
 /* ================= RENDER ================= */
 function render(){
   const view = document.getElementById('view');
   if(state.view==='switcher') view.innerHTML = renderSwitcher();
   else if(state.view==='operational-home') view.innerHTML = renderOperationalHome();
+  else if(state.view==='operational-category') view.innerHTML = renderOperationalCategory();
   else if(state.view==='home') view.innerHTML = renderHome();
   else if(state.view==='vault') view.innerHTML = renderVaultView({type:'simple', key:state.vaultKey});
   else if(state.view==='business-home') view.innerHTML = renderBusinessHome();
@@ -288,7 +290,7 @@ function updateNavActive(){
   nTrinity.innerHTML = icon('home');
   nBusiness.innerHTML = icon('business');
   nSettings.innerHTML = icon('gear');
-  nOperational.classList.toggle('active', state.view==='operational-home');
+  nOperational.classList.toggle('active', state.view==='operational-home' || state.view==='operational-category');
   nTrinity.classList.toggle('active', state.view==='home' || state.view==='vault' || state.view==='progress');
   nBusiness.classList.toggle('active', state.view==='business-home' || state.view==='subvault');
   nSettings.classList.toggle('active', state.view==='settings');
@@ -318,33 +320,121 @@ function renderSwitcher(){
 function operationalEntryTitle(e){
   return e.path && e.path.length ? e.path.join(' › ') : '(untitled)';
 }
+/* JSON.stringify + HTML-entity the quotes, so arbitrary user text (category
+   names, folder names) can be embedded as a JS string literal inside a
+   double-quoted onclick="" attribute without breaking out of either. */
+function jsAttr(s){
+  return JSON.stringify(String(s)).replace(/"/g,'&quot;');
+}
+function getOperationalCategories(){
+  const seen = {};
+  operationalEntries.forEach(function(e){ if(e.path && e.path[0]) seen[e.path[0]]=true; });
+  return Object.keys(seen).sort();
+}
+function renderOperationalEntryRow(e, labelOverride){
+  const title = escapeHtml(labelOverride!=null ? labelOverride : operationalEntryTitle(e));
+  const rawSnippet = e.content||'';
+  const snippet = escapeHtml(rawSnippet.slice(0,80)) + (rawSnippet.length>80?'&hellip;':'');
+  return '<div class="entry-row">'
+    +'<button class="entry-main" style="--accent:var(--accent-operational)" onclick="viewOperationalEntry(\''+e.id+'\')">'
+      +'<div class="entry-title">'+title+'</div>'
+      +'<div class="entry-snippet">'+snippet+'</div>'
+      +'<div class="entry-date">'+formatOpDate(e.updatedAt)+'</div>'
+    +'</button>'
+    +'<div class="entry-actions">'
+      +'<button class="icon-btn" title="Edit" onclick="openOperationalEntryForm(\''+e.id+'\')">'+icon('edit')+'</button>'
+      +'<button class="icon-btn" title="Delete" onclick="confirmDeleteOperationalEntry(\''+e.id+'\')">'+icon('trash')+'</button>'
+    +'</div>'
+  +'</div>';
+}
+function renderOperationalChipsHtml(){
+  const categories = getOperationalCategories();
+  if(categories.length===0) return '<div class="empty-state">Nothing here yet. Tap "+ Add" to create the first entry.</div>';
+  return '<div class="chip-row">'+categories.map(function(c){
+    return '<button class="chip" style="border:none;cursor:pointer;font-family:inherit;" onclick="openOperationalCategory('+jsAttr(c)+')">'+escapeHtml(c)+'</button>';
+  }).join('')+'</div>';
+}
+function filterOperationalHome(){
+  const input = document.getElementById('op-search-input');
+  const results = document.getElementById('op-results');
+  if(!input || !results) return;
+  const q = input.value.trim().toLowerCase();
+  if(!q){ results.innerHTML = renderOperationalChipsHtml(); return; }
+  const matches = operationalEntries.filter(function(e){
+    const hay = (operationalEntryTitle(e)+' '+(e.content||'')).toLowerCase();
+    return hay.indexOf(q)>-1;
+  }).sort(function(a,b){ return opTimeValue(b.updatedAt)-opTimeValue(a.updatedAt); });
+  results.innerHTML = matches.length
+    ? '<div class="entry-list">'+matches.map(function(e){ return renderOperationalEntryRow(e); }).join('')+'</div>'
+    : '<div class="empty-state">No matching entries.</div>';
+}
 function renderOperationalHome(){
-  const list = operationalEntries.slice().sort(function(a,b){ return opTimeValue(b.updatedAt)-opTimeValue(a.updatedAt); });
-  const rows = list.length===0
-    ? '<div class="empty-state">Nothing here yet. Tap "+ Add" to create the first entry.</div>'
-    : list.map(function(e){
-        const title = escapeHtml(operationalEntryTitle(e));
-        const rawSnippet = e.content||'';
-        const snippet = escapeHtml(rawSnippet.slice(0,80)) + (rawSnippet.length>80?'&hellip;':'');
-        return '<div class="entry-row">'
-          +'<button class="entry-main" style="--accent:var(--accent-operational)" onclick="viewOperationalEntry(\''+e.id+'\')">'
-            +'<div class="entry-title">'+title+'</div>'
-            +'<div class="entry-snippet">'+snippet+'</div>'
-            +'<div class="entry-date">'+formatOpDate(e.updatedAt)+'</div>'
-          +'</button>'
-          +'<div class="entry-actions">'
-            +'<button class="icon-btn" title="Edit" onclick="openOperationalEntryForm(\''+e.id+'\')">'+icon('edit')+'</button>'
-            +'<button class="icon-btn" title="Delete" onclick="confirmDeleteOperationalEntry(\''+e.id+'\')">'+icon('trash')+'</button>'
-          +'</div>'
-        +'</div>';
-      }).join('');
   return '<div class="view-header">'
     +'<button class="icon-btn" onclick="goSwitcher()">'+icon('back')+'</button>'
     +'<div class="page-pill" style="border-color:var(--accent-operational)">Operational Vault</div>'
     +'<button class="add-btn" style="background:var(--accent-operational)" onclick="openOperationalEntryForm()">'+icon('plus')+' Add</button>'
     +'</div>'
     +'<p class="view-desc">Reference library for procedures, rules, and how-tos.</p>'
-    +'<div class="entry-list">'+rows+'</div>';
+    +'<div class="form-body" style="margin-bottom:16px;"><input id="op-search-input" type="text" placeholder="Search entries…" oninput="filterOperationalHome()" /></div>'
+    +'<div id="op-results">'+renderOperationalChipsHtml()+'</div>';
+}
+
+/* ---- category page: nested folder tree by path[1..-2], leaf = path[-1] ---- */
+function buildOperationalTree(entries){
+  const root = {folders:{}, items:[]};
+  entries.forEach(function(e){
+    const segments = (e.path||[]).slice(1);
+    let node = root;
+    for(let i=0;i<segments.length-1;i++){
+      const seg = segments[i];
+      if(!node.folders[seg]) node.folders[seg] = {folders:{}, items:[]};
+      node = node.folders[seg];
+    }
+    node.items.push(e);
+  });
+  return root;
+}
+function renderOperationalTreeNode(node, depth){
+  const indent = depth*16;
+  let html = '';
+  Object.keys(node.folders).sort().forEach(function(name){
+    html += '<div class="settings-section-label" style="margin-left:'+indent+'px">'+escapeHtml(name)+'</div>'
+      + renderOperationalTreeNode(node.folders[name], depth+1);
+  });
+  if(node.items.length){
+    html += '<div class="entry-list" style="margin-left:'+indent+'px">'+node.items.map(function(e){
+      const segs = e.path||[];
+      const label = segs.length ? segs[segs.length-1] : null;
+      return renderOperationalEntryRow(e, label);
+    }).join('')+'</div>';
+  }
+  return html;
+}
+function renderOperationalCategory(){
+  const cat = state.opCategory;
+  const autoEntries = operationalEntries.filter(function(e){ return e.path && e.path[0]===cat; });
+  const autoIds = {};
+  autoEntries.forEach(function(e){ autoIds[e.id]=true; });
+  const crossRefEntries = operationalEntries.filter(function(e){
+    return !autoIds[e.id] && e.linkedEntryIds && e.linkedEntryIds.some(function(id){ return autoIds[id]; });
+  });
+  let body;
+  if(autoEntries.length===0 && crossRefEntries.length===0){
+    body = '<div class="empty-state">Nothing in this category yet.</div>';
+  } else {
+    body = renderOperationalTreeNode(buildOperationalTree(autoEntries), 0);
+    if(crossRefEntries.length){
+      body += '<div class="settings-section-label">Linked from elsewhere</div>'
+        +'<div class="entry-list">'+crossRefEntries.map(function(e){ return renderOperationalEntryRow(e); }).join('')+'</div>';
+    }
+  }
+  return '<div class="view-header">'
+    +'<button class="icon-btn" onclick="openOperationalHome()">'+icon('back')+'</button>'
+    +'<div class="page-pill" style="border-color:var(--accent-operational)">'+escapeHtml(cat)+'</div>'
+    +'<button class="add-btn" style="background:var(--accent-operational)" onclick="openOperationalEntryForm(null, '+jsAttr(cat)+')">'+icon('plus')+' Add</button>'
+    +'</div>'
+    +'<p class="view-desc">Entries filed under '+escapeHtml(cat)+'.</p>'
+    +body;
 }
 
 function viewOperationalEntry(id){
@@ -364,9 +454,9 @@ function viewOperationalEntry(id){
   showModal(html);
 }
 
-function openOperationalEntryForm(id){
+function openOperationalEntryForm(id, prefillCategory){
   const existing = id ? getOperationalEntry(id) : null;
-  const pathVal = escapeHtml(existing && existing.path ? existing.path.join(' > ') : '');
+  const pathVal = escapeHtml(existing && existing.path ? existing.path.join(' > ') : (prefillCategory ? prefillCategory+' > ' : ''));
   const contentVal = escapeHtml(existing ? existing.content||'' : '');
   const heading = existing ? 'Edit' : 'Add';
   const html = '<div class="card" style="--accent:var(--accent-operational)">'
