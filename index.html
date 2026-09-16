@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<!-- Baseline CSP. This app renders via onclick="" attributes and inline
+     style="" throughout, so script-src/style-src need 'unsafe-inline' -
+     this restricts which origins can load scripts/styles/connect/frame,
+     not inline-script injection. Closing that gap needs moving off
+     inline event handlers, a separate larger change. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self'; manifest-src 'self' blob:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src https://trinity-vaults.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'self';">
 <script>
   // Apply saved theme immediately, before first paint, so there's no light-flash in dark mode.
   (function(){

@@ -1,7 +1,7 @@
 /* =================================================================
    CLOUD SYNC SETUP
    Configured for the trinity-vaults Firebase project.
-   Sign in with anilegfeb@gmail.com on each device to sync between them.
+   Sign in with the same Google account on each device to sync between them.
 ================================================================= */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBwQWLyqhF-yg0pqq8W-Zcd-glOLpOaTIQ",
@@ -157,6 +157,9 @@ function escapeHtml(str){
 }
 function todayStr(){
   return new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+}
+function hapticTap(){
+  try{ navigator.vibrate?.(15); }catch(e){}
 }
 function getCfg(target){ return target.type==='simple' ? VAULTS[target.key] : BUSINESS_SUB[target.key]; }
 function getList(target){ return target.type==='simple' ? db[target.key] : db.business[target.key]; }
@@ -607,6 +610,7 @@ function saveOperationalEntryForm(id){
   }
   if(id) saveOperationalEntry(id, {path:path, content:content, attachment:attachment});
   else addOperationalEntry({path:path, content:content, attachment:attachment});
+  hapticTap();
   closeModal();
   render();
 }
@@ -947,6 +951,7 @@ function saveEntryForm(type, key, id){
     }
   }
   saveDB();
+  hapticTap();
   closeModal();
   render();
 }
@@ -1084,6 +1089,7 @@ let unsubscribeSnapshot = null;
 let unsubscribeOperational = null;
 let applyingRemoteUpdate = false;
 let saveDebounceTimer = null;
+let hasPendingLocalWrite = false;
 
 function initCloud(){
   if(!FIREBASE_CONFIG) return;
@@ -1131,6 +1137,11 @@ function signOutCloud(){
 function subscribeToCloud(uid){
   const ref = firebase.firestore().collection('trinityVaultsUsers').doc(uid);
   unsubscribeSnapshot = ref.onSnapshot(function(doc){
+    /* A local edit is queued or in flight - applying this snapshot now
+       (which doesn't include that edit yet) would clobber it in both
+       memory and localStorage before it gets pushed. Skip it; our own
+       write will settle things once it completes. */
+    if(hasPendingLocalWrite) return;
     if(doc.exists){
       const remote = doc.data().db;
       if(remote){
@@ -1147,13 +1158,12 @@ function subscribeToCloud(uid){
 }
 function pushToCloud(){
   if(!cloudEnabled || !cloudUser || applyingRemoteUpdate) return;
+  hasPendingLocalWrite = true;
   clearTimeout(saveDebounceTimer);
   saveDebounceTimer = setTimeout(function(){
-    try{
-      firebase.firestore().collection('trinityVaultsUsers').doc(cloudUser.uid).set({db:db, updatedAt:Date.now()});
-    }catch(e){
-      console.log('Cloud save failed (continuing anyway):', e);
-    }
+    firebase.firestore().collection('trinityVaultsUsers').doc(cloudUser.uid).set({db:db, updatedAt:Date.now()})
+      .catch(function(e){ console.log('Cloud save failed (continuing anyway):', e); })
+      .then(function(){ hasPendingLocalWrite = false; });
   }, 400);
 }
 
